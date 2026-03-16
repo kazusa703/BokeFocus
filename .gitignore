@@ -1,0 +1,19 @@
+# Xcode
+*.xcodeproj/
+xcuserdata/
+DerivedData/
+*.xcworkspace/
+*.pbxproj
+
+# macOS
+.DS_Store
+*.swp
+
+# Build
+build/
+
+# CocoaPods
+Pods/
+
+# Keys
+*.env
