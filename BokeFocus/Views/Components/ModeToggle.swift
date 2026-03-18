@@ -6,7 +6,7 @@ struct ModeToggle: View {
     var body: some View {
         Toggle(isOn: $isNegative) {
             Label(
-                isNegative ? "Exclude" : "Include",
+                isNegative ? L.exclude : L.include,
                 systemImage: isNegative ? "minus.circle.fill" : "plus.circle.fill"
             )
             .font(.caption)

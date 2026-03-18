@@ -8,8 +8,8 @@ struct BlurSlider: View {
         HStack {
             Image(systemName: "circle")
                 .font(.caption)
-            Slider(value: $radius, in: 5 ... 50, step: 1) {
-                Text("Blur")
+            Slider(value: $radius, in: 1 ... 100, step: 1) {
+                Text(L.blur)
             } onEditingChanged: { editing in
                 if !editing {
                     onChanged()
