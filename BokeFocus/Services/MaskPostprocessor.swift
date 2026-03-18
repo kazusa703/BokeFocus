@@ -3,7 +3,7 @@ import CoreGraphics
 import CoreImage
 import CoreML
 
-final class MaskPostprocessor {
+final nonisolated class MaskPostprocessor {
     private let ciContext = CIContextManager.shared.context
 
     // MARK: - Process EdgeSAM decoder output → CIImage mask
@@ -37,7 +37,7 @@ final class MaskPostprocessor {
 
         let ptr = rawMask.dataPointer.assumingMemoryBound(to: Float.self)
 
-        // 1. Compute mask-space padding with float precision
+        // 1. Compute mask-space padding
         let padMaskX = Int((CGFloat(params.padX) * CGFloat(maskW) / 1024.0).rounded())
         let padMaskY = Int((CGFloat(params.padY) * CGFloat(maskH) / 1024.0).rounded())
         let contentW = Int((CGFloat(params.resizedWidth) * CGFloat(maskW) / 1024.0).rounded())
@@ -69,13 +69,15 @@ final class MaskPostprocessor {
             .transformed(by: CGAffineTransform(scaleX: scaleX, y: scaleY))
             .cropped(to: CGRect(origin: .zero, size: params.originalSize))
 
-        // 5. Sharpen edges in logits space (before threshold)
+        // 5. Multi-pass edge sharpening in logits space (before threshold)
+        let resolution = sqrt(params.originalSize.width * params.originalSize.height)
+        let sharpenRadius = min(2.0, 1.5 * (resolution / 2000.0))
         let sharpened = upscaled
             .applyingFilter(
                 "CIUnsharpMask",
                 parameters: [
-                    kCIInputRadiusKey: 1.5,
-                    kCIInputIntensityKey: 0.5,
+                    kCIInputRadiusKey: sharpenRadius,
+                    kCIInputIntensityKey: 0.7,
                 ]
             )
             .cropped(to: CGRect(origin: .zero, size: params.originalSize))
@@ -85,7 +87,6 @@ final class MaskPostprocessor {
             sharpened, from: sharpened.extent
         ) else { return nil }
 
-        let resolution = sqrt(params.originalSize.width * params.originalSize.height)
         return thresholdToMask(cgSharpened, threshold: threshold, imageResolution: resolution)
     }
 
@@ -97,7 +98,11 @@ final class MaskPostprocessor {
         let bytesPerRow = width * MemoryLayout<Float>.size
         let data = Data(bytes: pixels, count: pixels.count * MemoryLayout<Float>.size)
         let colorSpace = CGColorSpaceCreateDeviceGray()
-        let bitmapInfo = CGBitmapInfo(rawValue: CGImageAlphaInfo.none.rawValue | CGBitmapInfo.floatComponents.rawValue | CGBitmapInfo.byteOrder32Little.rawValue)
+        let bitmapInfo = CGBitmapInfo(
+            rawValue: CGImageAlphaInfo.none.rawValue
+                | CGBitmapInfo.floatComponents.rawValue
+                | CGBitmapInfo.byteOrder32Little.rawValue
+        )
 
         guard let provider = CGDataProvider(data: data as CFData),
               let cgImage = CGImage(
@@ -128,7 +133,11 @@ final class MaskPostprocessor {
 
         let colorSpace = CGColorSpaceCreateDeviceGray()
         let bytesPerRow = w * MemoryLayout<Float>.size
-        let bitmapInfo = CGBitmapInfo(rawValue: CGImageAlphaInfo.none.rawValue | CGBitmapInfo.floatComponents.rawValue | CGBitmapInfo.byteOrder32Little.rawValue)
+        let bitmapInfo = CGBitmapInfo(
+            rawValue: CGImageAlphaInfo.none.rawValue
+                | CGBitmapInfo.floatComponents.rawValue
+                | CGBitmapInfo.byteOrder32Little.rawValue
+        )
 
         guard let ctx = CGContext(
             data: nil, width: w, height: h,
@@ -142,7 +151,8 @@ final class MaskPostprocessor {
         let floatPtr = data.assumingMemoryBound(to: Float.self)
 
         // Adaptive ramp width: narrower on high-res images for sharper edges
-        let rampWidth: Float = max(0.2, 0.5 * Float(1024.0 / imageResolution))
+        // More aggressive sharpening than before
+        let rampWidth: Float = max(0.15, 0.4 * Float(1024.0 / imageResolution))
 
         var binaryPixels = [UInt8](repeating: 0, count: w * h)
         for i in 0 ..< w * h {

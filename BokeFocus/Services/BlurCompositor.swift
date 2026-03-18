@@ -1,36 +1,49 @@
 import CoreImage
 import CoreImage.CIFilterBuiltins
 
-final class BlurCompositor {
+final nonisolated class BlurCompositor: Sendable {
+    private let guidedFilter = GuidedFilter()
+
     func compositeBlur(
         original: CIImage,
         mask: CIImage,
-        blurRadius: Float = 20.0
+        blurRadius: Float = 20.0,
+        style: BlurStyle = .gaussian
     ) -> CIImage? {
-        // 1. Refine mask edges
-        let refined = refineMask(mask, extent: original.extent)
+        // 1. Enhanced mask refinement pipeline
+        let refined = refineMask(mask, guide: original, extent: original.extent)
 
-        // 2. Create depth-aware blur gradient
-        // Near foreground edge = less blur, far from edge = full blur
-        let depthBlurred = applyDepthAwareBlur(
-            original: original, mask: refined, blurRadius: blurRadius
-        )
+        let extent = original.extent
 
-        guard let blurred = depthBlurred else { return nil }
+        // 2. Apply selected blur style
+        let blurred: CIImage?
+        switch style {
+        case .gaussian:
+            blurred = applyDepthAwareBlur(
+                original: original, mask: refined, blurRadius: blurRadius
+            )
+        case .bokeh:
+            blurred = applyBokehBlur(original: original, radius: blurRadius, extent: extent)
+        case .zoom:
+            blurred = applyZoomBlur(original: original, radius: blurRadius, extent: extent)
+        case .motion:
+            blurred = applyMotionBlur(original: original, radius: blurRadius, extent: extent)
+        case .mosaic:
+            blurred = applyMosaic(original: original, radius: blurRadius, extent: extent)
+        }
+
+        guard let bg = blurred else { return nil }
 
         // 3. Composite: sharp foreground + blurred background
         let blend = CIFilter.blendWithMask()
         blend.inputImage = original
-        blend.backgroundImage = blurred
+        blend.backgroundImage = bg
         blend.maskImage = refined
         return blend.outputImage
     }
 
-    // MARK: - Depth-aware blur (graduated falloff)
+    // MARK: - Gaussian (depth-aware)
 
-    /// Creates a more realistic blur by varying intensity based on
-    /// distance from the foreground edge. Objects near the subject
-    /// are blurred less than distant background.
     private func applyDepthAwareBlur(
         original: CIImage,
         mask: CIImage,
@@ -38,14 +51,10 @@ final class BlurCompositor {
     ) -> CIImage? {
         let extent = original.extent
 
-        // Create distance-based blur map from mask
-        // Dilate mask progressively → pixels that become white later are "closer" to foreground
         let invertedMask = mask.applyingFilter(
             "CIColorInvert", parameters: [:]
         ).cropped(to: extent)
 
-        // Blur the inverted mask to create a smooth distance field
-        // Areas far from foreground = high value = more blur
         let distanceField = invertedMask
             .clampedToExtent()
             .applyingFilter(
@@ -54,7 +63,6 @@ final class BlurCompositor {
             )
             .cropped(to: extent)
 
-        // Apply two blur levels and blend based on distance
         let lightBlur = original
             .clampedToExtent()
             .applyingFilter(
@@ -71,7 +79,6 @@ final class BlurCompositor {
             )
             .cropped(to: extent)
 
-        // Blend: near foreground = light blur, far = heavy blur
         let gradientBlend = CIFilter.blendWithMask()
         gradientBlend.inputImage = heavyBlur
         gradientBlend.backgroundImage = lightBlur
@@ -79,36 +86,141 @@ final class BlurCompositor {
         return gradientBlend.outputImage?.cropped(to: extent)
     }
 
-    // MARK: - Mask refinement with resolution-adaptive parameters
+    // MARK: - Bokeh (lens-like circular bokeh)
 
-    private func refineMask(_ mask: CIImage, extent: CGRect) -> CIImage {
+    private func applyBokehBlur(
+        original: CIImage, radius: Float, extent: CGRect
+    ) -> CIImage? {
+        original
+            .clampedToExtent()
+            .applyingFilter("CIBokehBlur", parameters: [
+                kCIInputRadiusKey: radius,
+                "inputRingAmount": 0.3,
+                "inputRingSize": 0.1,
+                "inputSoftness": 1.0,
+            ])
+            .cropped(to: extent)
+    }
+
+    // MARK: - Zoom blur (radial)
+
+    private func applyZoomBlur(
+        original: CIImage, radius: Float, extent: CGRect
+    ) -> CIImage? {
+        let center = CIVector(x: extent.midX, y: extent.midY)
+        return original
+            .clampedToExtent()
+            .applyingFilter("CIZoomBlur", parameters: [
+                kCIInputCenterKey: center,
+                "inputAmount": radius * 0.5,
+            ])
+            .cropped(to: extent)
+    }
+
+    // MARK: - Motion blur (directional)
+
+    private func applyMotionBlur(
+        original: CIImage, radius: Float, extent: CGRect
+    ) -> CIImage? {
+        original
+            .clampedToExtent()
+            .applyingFilter("CIMotionBlur", parameters: [
+                kCIInputRadiusKey: radius,
+                kCIInputAngleKey: 0.0,
+            ])
+            .cropped(to: extent)
+    }
+
+    // MARK: - Mosaic (pixelation)
+
+    private func applyMosaic(
+        original: CIImage, radius: Float, extent: CGRect
+    ) -> CIImage? {
+        let scale = max(2.0, Float(radius) * 0.6)
+        return original
+            .applyingFilter("CIPixellate", parameters: [
+                kCIInputScaleKey: scale,
+                kCIInputCenterKey: CIVector(x: extent.midX, y: extent.midY),
+            ])
+            .cropped(to: extent)
+    }
+
+    // MARK: - Enhanced mask refinement
+
+    /// Full refinement pipeline:
+    /// 1. Hole filling (morphological close)
+    /// 2. Small blob removal (open)
+    /// 3. Guided filter (edge-aware refinement using original image)
+    /// 4. Edge sharpening
+    /// 5. Erode + feather
+    private func refineMask(
+        _ mask: CIImage, guide: CIImage, extent: CGRect
+    ) -> CIImage {
         let nominalRes: CGFloat = 1024.0
         let actualRes = sqrt(extent.width * extent.height)
         let scaleFactor = max(0.5, actualRes / nominalRes)
 
-        // Cap feather radius to prevent halos on high-res images
-        let morphRadius = min(2.0 * scaleFactor, 4.0)
-        let featherRadius = min(2.5 * scaleFactor, 4.0)
+        // Step 1: Hole filling — morphological close (dilate → erode)
+        // Fills small holes inside the foreground mask
+        let closeRadius = min(3.0 * scaleFactor, 5.0)
+        let closed = mask
+            .applyingFilter(
+                "CIMorphologyMaximum",
+                parameters: [kCIInputRadiusKey: closeRadius]
+            )
+            .applyingFilter(
+                "CIMorphologyMinimum",
+                parameters: [kCIInputRadiusKey: closeRadius]
+            )
+            .cropped(to: extent)
 
-        // Sharpen mask edges before morphology
-        let sharpened = mask
+        // Step 2: Small blob removal — morphological open (erode → dilate)
+        // Removes small isolated foreground artifacts
+        let openRadius = min(2.0 * scaleFactor, 4.0)
+        let opened = closed
+            .applyingFilter(
+                "CIMorphologyMinimum",
+                parameters: [kCIInputRadiusKey: openRadius]
+            )
+            .applyingFilter(
+                "CIMorphologyMaximum",
+                parameters: [kCIInputRadiusKey: openRadius]
+            )
+            .cropped(to: extent)
+
+        // Step 3: Guided filter — refine mask edges using original image
+        // The filter follows color boundaries in the original photo
+        let guidedRadius = max(8, Int(12.0 * scaleFactor))
+        let guidedEps: Float = 0.02
+        let guided = guidedFilter.apply(
+            mask: opened,
+            guide: guide,
+            radius: guidedRadius,
+            eps: guidedEps,
+            subsample: max(2, Int(actualRes / 512.0))
+        ) ?? opened
+
+        // Step 4: Sharpen mask edges
+        let sharpened = guided
             .applyingFilter(
                 "CIUnsharpMask",
                 parameters: [
                     kCIInputRadiusKey: min(2.0 * scaleFactor, 3.0),
-                    kCIInputIntensityKey: 0.6,
+                    kCIInputIntensityKey: 0.8,
                 ]
             )
             .cropped(to: extent)
 
-        // Erode to remove fringe artifacts at foreground/background boundary
+        // Step 5: Final erode + feather
+        let morphRadius = min(1.5 * scaleFactor, 3.0)
+        let featherRadius = min(2.0 * scaleFactor, 3.5)
+
         let eroded = sharpened
             .applyingFilter(
                 "CIMorphologyMinimum",
                 parameters: [kCIInputRadiusKey: morphRadius]
             )
 
-        // Feather for smooth foreground-to-background transition
         return eroded
             .clampedToExtent()
             .applyingFilter(

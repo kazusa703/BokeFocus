@@ -41,7 +41,7 @@ final class EdgeSAMEngine {
     // MARK: - Decode (~12ms, run per interaction)
 
     struct DecoderResult {
-        let mask: MLMultiArray // [256, 256] logits
+        let mask: MLMultiArray // [256, 256] logits — weighted blend of top masks
         let score: Float
         let stabilityScore: Float
         let allMasks: MLMultiArray // [1, 4, 256, 256]
@@ -64,13 +64,10 @@ final class EdgeSAMEngine {
         let masks = output.masks
         let planeSize = 256 * 256
 
-        // Select best mask using stability score (more reliable than IoU score)
         let masksPtr = masks.dataPointer.assumingMemoryBound(to: Float.self)
 
-        var bestIdx = 0
-        var bestStability: Float = -Float.infinity
-        var bestIoUScore: Float = -Float.infinity
-
+        // Compute stability score for each of the 4 candidate masks
+        var maskInfos: [(index: Int, stability: Float, iou: Float)] = []
         for i in 0 ..< 4 {
             let offset = i * planeSize
             let stability = computeStabilityScore(
@@ -80,34 +77,85 @@ final class EdgeSAMEngine {
                 offset: 1.0
             )
             let iouScore = scores[[0, NSNumber(value: i)] as [NSNumber]].floatValue
-
-            // Primary: stability score, secondary: IoU score
-            if stability > bestStability ||
-                (stability == bestStability && iouScore > bestIoUScore)
-            {
-                bestStability = stability
-                bestIoUScore = iouScore
-                bestIdx = i
-            }
+            maskInfos.append((index: i, stability: stability, iou: iouScore))
         }
 
-        guard let bestMask = extractMask(
-            from: masks, index: bestIdx, height: 256, width: 256
-        ) else { return nil }
+        // Sort by stability (desc), then IoU (desc)
+        maskInfos.sort {
+            if $0.stability != $1.stability { return $0.stability > $1.stability }
+            return $0.iou > $1.iou
+        }
+
+        // Weighted blend of top-2 masks in logits space
+        // Better boundary quality than picking single best mask
+        let blended = weightedBlendTopMasks(
+            masksPtr: masksPtr,
+            maskInfos: maskInfos,
+            planeSize: planeSize,
+            topK: 2
+        )
 
         return DecoderResult(
-            mask: bestMask,
-            score: bestIoUScore,
-            stabilityScore: bestStability,
+            mask: blended,
+            score: maskInfos[0].iou,
+            stabilityScore: maskInfos[0].stability,
             allMasks: masks
         )
     }
 
+    // MARK: - Weighted logits blend
+
+    /// Blend top-K masks using stability scores as weights.
+    /// This produces smoother, more confident boundaries than
+    /// picking a single mask.
+    private func weightedBlendTopMasks(
+        masksPtr: UnsafePointer<Float>,
+        maskInfos: [(index: Int, stability: Float, iou: Float)],
+        planeSize: Int,
+        topK: Int
+    ) -> MLMultiArray {
+        let k = min(topK, maskInfos.count)
+
+        // Compute softmax-like weights from stability scores
+        var weights = [Float](repeating: 0, count: k)
+        var maxStab: Float = -Float.infinity
+        for i in 0 ..< k {
+            maxStab = max(maxStab, maskInfos[i].stability)
+        }
+        var sumExp: Float = 0
+        for i in 0 ..< k {
+            // Temperature=5.0 → sharper weighting toward best mask
+            let w = exp((maskInfos[i].stability - maxStab) * 5.0)
+            weights[i] = w
+            sumExp += w
+        }
+        for i in 0 ..< k {
+            weights[i] /= sumExp
+        }
+
+        let result = try! MLMultiArray(
+            shape: [1, 1, 256, 256 as NSNumber],
+            dataType: .float32
+        )
+        let dstPtr = result.dataPointer.assumingMemoryBound(to: Float.self)
+
+        // Initialize to zero
+        dstPtr.update(repeating: 0, count: planeSize)
+
+        // Accumulate weighted logits
+        for i in 0 ..< k {
+            let srcOffset = maskInfos[i].index * planeSize
+            let w = weights[i]
+            for j in 0 ..< planeSize {
+                dstPtr[j] += masksPtr[srcOffset + j] * w
+            }
+        }
+
+        return result
+    }
+
     // MARK: - Stability Score
 
-    /// Compute stability score: IoU between masks thresholded at
-    /// (threshold - offset) and (threshold + offset).
-    /// A high score means the mask boundary is confident / stable.
     private func computeStabilityScore(
         logits: UnsafePointer<Float>,
         count: Int,
@@ -130,28 +178,5 @@ final class EdgeSAMEngine {
         }
 
         return union > 0 ? Float(intersection) / Float(union) : 0.0
-    }
-
-    // MARK: - Extract single mask from 4-candidate output
-
-    private func extractMask(
-        from allMasks: MLMultiArray,
-        index: Int,
-        height: Int,
-        width: Int
-    ) -> MLMultiArray? {
-        guard let single = try? MLMultiArray(
-            shape: [1, 1, NSNumber(value: height), NSNumber(value: width)],
-            dataType: .float32
-        ) else { return nil }
-
-        let srcPtr = allMasks.dataPointer.assumingMemoryBound(to: Float.self)
-        let dstPtr = single.dataPointer.assumingMemoryBound(to: Float.self)
-        let planeSize = height * width
-        let srcOffset = index * planeSize
-
-        dstPtr.update(from: srcPtr.advanced(by: srcOffset), count: planeSize)
-
-        return single
     }
 }

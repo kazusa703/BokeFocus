@@ -1,7 +1,7 @@
 import CoreImage
 
 /// Shared CIContext — created once at launch, reused throughout
-final class CIContextManager {
+final nonisolated class CIContextManager: Sendable {
     static let shared = CIContextManager()
     let context: CIContext
 

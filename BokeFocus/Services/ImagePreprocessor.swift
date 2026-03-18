@@ -4,7 +4,7 @@ import CoreImage
 import CoreML
 import UIKit
 
-struct LetterboxParams {
+struct LetterboxParams: Sendable {
     let scale: CGFloat
     let resizedWidth: Int
     let resizedHeight: Int
@@ -13,7 +13,7 @@ struct LetterboxParams {
     let originalSize: CGSize
 }
 
-final class ImagePreprocessor {
+final nonisolated class ImagePreprocessor: Sendable {
     private static let mean: [Float] = [0.485, 0.456, 0.406]
     private static let std: [Float] = [0.229, 0.224, 0.225]
     private static let targetSize = 1024
