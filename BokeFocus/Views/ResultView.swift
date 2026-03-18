@@ -19,6 +19,8 @@ struct ResultView: View {
                     .aspectRatio(contentMode: .fit)
                     .clipShape(RoundedRectangle(cornerRadius: 12))
                     .padding(.horizontal)
+                    .accessibilityLabel(showOriginal ? L.original : L.result)
+                    .accessibilityHint(L.longPressCompare)
                     .onLongPressGesture(
                         minimumDuration: .infinity,
                         pressing: { pressing in showOriginal = pressing },

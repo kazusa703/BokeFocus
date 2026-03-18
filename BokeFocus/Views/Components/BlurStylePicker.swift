@@ -17,7 +17,7 @@ struct BlurStylePicker: View {
                         Image(systemName: style.icon)
                             .font(.body)
                         Text(style.label)
-                            .font(.system(size: 9))
+                            .font(.system(.caption2))
                     }
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 6)

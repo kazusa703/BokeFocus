@@ -88,12 +88,12 @@ final class EdgeSAMEngine {
 
         // Weighted blend of top-2 masks in logits space
         // Better boundary quality than picking single best mask
-        let blended = weightedBlendTopMasks(
+        guard let blended = weightedBlendTopMasks(
             masksPtr: masksPtr,
             maskInfos: maskInfos,
             planeSize: planeSize,
             topK: 2
-        )
+        ) else { return nil }
 
         return DecoderResult(
             mask: blended,
@@ -113,7 +113,7 @@ final class EdgeSAMEngine {
         maskInfos: [(index: Int, stability: Float, iou: Float)],
         planeSize: Int,
         topK: Int
-    ) -> MLMultiArray {
+    ) -> MLMultiArray? {
         let k = min(topK, maskInfos.count)
 
         // Compute softmax-like weights from stability scores
@@ -133,10 +133,10 @@ final class EdgeSAMEngine {
             weights[i] /= sumExp
         }
 
-        let result = try! MLMultiArray(
+        guard let result = try? MLMultiArray(
             shape: [1, 1, 256, 256 as NSNumber],
             dataType: .float32
-        )
+        ) else { return nil }
         let dstPtr = result.dataPointer.assumingMemoryBound(to: Float.self)
 
         // Initialize to zero

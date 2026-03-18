@@ -50,6 +50,8 @@ struct EditorView: View {
             .contentShape(Rectangle())
             .gesture(bboxGesture(geometry: geometry))
             .simultaneousGesture(tapGesture(geometry: geometry))
+            .accessibilityLabel(L.tapOrDraw)
+            .accessibilityAddTraits(.allowsDirectInteraction)
         }
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackground(.hidden, for: .bottomBar)

@@ -19,6 +19,7 @@ struct HomeView: View {
                         .font(.system(size: 72))
                         .foregroundStyle(.tint)
                         .symbolEffect(.pulse, options: .repeating.speed(0.5))
+                        .accessibilityHidden(true)
 
                     Text(L.appName)
                         .font(.largeTitle.bold())

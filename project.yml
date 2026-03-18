@@ -29,7 +29,7 @@ settings:
     INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone: UIInterfaceOrientationPortrait
     INFOPLIST_KEY_NSPhotoLibraryUsageDescription: "Choose photos to apply background blur effects"
     INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription: "Save blurred photos to your photo library"
-    INFOPLIST_KEY_NSUserTrackingUsageDescription: "This identifier will be used to deliver personalized ads to you"
+    INFOPLIST_KEY_NSUserTrackingUsageDescription: "BokeFocus uses your advertising identifier to show relevant ads that support the free version of this app. No personal data is shared."
     INFOPLIST_KEY_ITSAppUsesNonExemptEncryption: NO
     INFOPLIST_KEY_GADApplicationIdentifier: "ca-app-pub-9569882864362674~7393222785"
 
