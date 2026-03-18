@@ -1,5 +1,6 @@
 import CoreImage
 import CoreML
+import Photos
 import PhotosUI
 import SwiftUI
 import UIKit
@@ -9,6 +10,43 @@ enum EditorState {
     case processing
     case masked
     case blurred
+}
+
+enum BlurStyle: String, CaseIterable, Identifiable {
+    case gaussian
+    case bokeh
+    case zoom
+    case motion
+    case mosaic
+
+    var id: String {
+        rawValue
+    }
+
+    var icon: String {
+        switch self {
+        case .gaussian: "circle.dotted"
+        case .bokeh: "sparkle"
+        case .zoom: "arrow.up.left.and.arrow.down.right"
+        case .motion: "wind"
+        case .mosaic: "squareshape.split.2x2"
+        }
+    }
+
+    var label: String {
+        switch self {
+        case .gaussian: L.gaussian
+        case .bokeh: L.bokeh
+        case .zoom: L.zoom
+        case .motion: L.motion
+        case .mosaic: L.mosaic
+        }
+    }
+}
+
+enum SaveResult {
+    case success
+    case failure(String)
 }
 
 @Observable
@@ -21,8 +59,10 @@ final class EditorViewModel {
     var maskOverlayImage: UIImage?
     var editorState: EditorState = .idle
     var blurRadius: Float = 20.0
+    var blurStyle: BlurStyle = .gaussian
     var isNegativeMode = false
     var edgeSAMAvailable = false
+    var isEncoding = false
 
     // Refine state
     var isRefineAdding = true // true = add blur, false = remove blur
@@ -87,21 +127,33 @@ final class EditorViewModel {
         displayImage = uiImage
         originalCIImage = CIImage(image: uiImage)
 
+        // Encode in background to avoid blocking UI
         if edgeSAMAvailable, let cgImage = uiImage.cgImage {
-            encodeWithEdgeSAM(cgImage: cgImage)
+            isEncoding = true
+            await encodeWithEdgeSAM(cgImage: cgImage)
+            isEncoding = false
         }
     }
 
-    private func encodeWithEdgeSAM(cgImage: CGImage) {
-        guard let (tensor, params) = imagePreprocessor.preprocess(image: cgImage) else {
+    /// Preprocess off MainActor, then encode on MainActor (CoreML uses Neural Engine)
+    private func encodeWithEdgeSAM(cgImage: CGImage) async {
+        // Heavy preprocessing runs off MainActor
+        guard let result = await preprocessOffMain(cgImage: cgImage) else {
             return
         }
-        letterboxParams = params
+        // CoreML prediction — dispatches to Neural Engine internally
+        letterboxParams = result.params
         do {
-            cachedEmbedding = try edgeSAMEngine.encode(imageTensor: tensor)
+            cachedEmbedding = try edgeSAMEngine.encode(imageTensor: result.tensor)
         } catch {
             print("[EdgeSAM] Encode failed: \(error)")
         }
+    }
+
+    private nonisolated func preprocessOffMain(
+        cgImage: CGImage
+    ) async -> (tensor: MLMultiArray, params: LetterboxParams)? {
+        imagePreprocessor.preprocess(image: cgImage)
     }
 
     // MARK: - Tap → Vision auto-detect
@@ -361,23 +413,67 @@ final class EditorViewModel {
         await applyBlur()
     }
 
+    /// Offload heavy CIContext rendering off MainActor
     private func applyBlur() async {
         guard let original = originalCIImage,
               let mask = maskCIImage else { return }
 
-        let result = blurCompositor.compositeBlur(
-            original: original, mask: mask, blurRadius: blurRadius
+        let radius = blurRadius
+        let style = blurStyle
+        let compositor = blurCompositor
+
+        let uiImage = await renderBlurInBackground(
+            compositor: compositor, original: original,
+            mask: mask, radius: radius, style: style
         )
 
-        guard let output = result else { return }
         // Check if selection was reset while compositing
-        guard maskCIImage != nil else { return }
+        guard maskCIImage != nil, let uiImage else { return }
+        blurredImage = uiImage
+        displayImage = uiImage
+        editorState = .blurred
+    }
+
+    /// Nonisolated render to avoid blocking MainActor
+    private nonisolated func renderBlurInBackground(
+        compositor: BlurCompositor,
+        original: CIImage,
+        mask: CIImage,
+        radius: Float,
+        style: BlurStyle
+    ) async -> UIImage? {
+        guard let output = compositor.compositeBlur(
+            original: original, mask: mask, blurRadius: radius, style: style
+        ) else { return nil }
 
         let context = CIContextManager.shared.context
-        guard let cgImage = context.createCGImage(output, from: output.extent) else { return }
-        blurredImage = UIImage(cgImage: cgImage)
-        displayImage = blurredImage
-        editorState = .blurred
+        guard let cgImage = context.createCGImage(output, from: output.extent) else {
+            return nil
+        }
+        return UIImage(cgImage: cgImage)
+    }
+
+    // MARK: - Save to Photo Library (with error handling)
+
+    func saveToPhotoLibrary() async -> SaveResult {
+        guard let image = blurredImage else { return .failure("No image") }
+
+        return await withCheckedContinuation { continuation in
+            PHPhotoLibrary.shared().performChanges {
+                guard let data = image.jpegData(compressionQuality: 0.95) else {
+                    return
+                }
+                let request = PHAssetCreationRequest.forAsset()
+                request.addResource(with: .photo, data: data, options: nil)
+            } completionHandler: { success, error in
+                if success {
+                    continuation.resume(returning: .success)
+                } else {
+                    let message = error?.localizedDescription ?? "Save failed"
+                    continuation.resume(returning: .failure(message))
+                }
+            }
+        }
     }
 
     // MARK: - Undo (editor)
@@ -436,8 +532,10 @@ final class EditorViewModel {
         refineUndoStack = []
         editorState = .idle
         blurRadius = 20.0
+        blurStyle = .gaussian
         isNegativeMode = false
         isRefineAdding = true
         brushSize = 30.0
+        isEncoding = false
     }
 }
