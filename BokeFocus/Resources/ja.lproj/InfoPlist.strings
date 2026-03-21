@@ -1,0 +1,8 @@
+/* Photo library read access */
+"NSPhotoLibraryUsageDescription" = "背景ぼかしエフェクトを適用する写真を選択します";
+
+/* Photo library write access */
+"NSPhotoLibraryAddUsageDescription" = "ぼかし加工した写真をフォトライブラリに保存します";
+
+/* App Tracking Transparency */
+"NSUserTrackingUsageDescription" = "BokeFocusは無料版を支える広告を表示するために広告識別子を使用します。個人データは共有されません。";

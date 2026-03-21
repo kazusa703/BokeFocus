@@ -19,17 +19,29 @@ struct RefineView: View {
                 }
 
                 Canvas { context, _ in
-                    if !currentStroke.isEmpty {
+                    if currentStroke.count >= 2 {
                         let color: Color = viewModel.isRefineAdding ? .red.opacity(0.4) : .blue.opacity(0.4)
                         let brushSize = CGFloat(viewModel.brushSize)
-                        for point in currentStroke {
-                            let rect = CGRect(
-                                x: point.x - brushSize / 2,
-                                y: point.y - brushSize / 2,
-                                width: brushSize, height: brushSize
-                            )
-                            context.fill(Path(ellipseIn: rect), with: .color(color))
+                        // Draw connected path for smooth coverage
+                        var path = Path()
+                        path.move(to: currentStroke[0])
+                        for i in 1 ..< currentStroke.count {
+                            path.addLine(to: currentStroke[i])
                         }
+                        context.stroke(
+                            path,
+                            with: .color(color),
+                            style: StrokeStyle(lineWidth: brushSize, lineCap: .round, lineJoin: .round)
+                        )
+                    } else if let point = currentStroke.first {
+                        let color: Color = viewModel.isRefineAdding ? .red.opacity(0.4) : .blue.opacity(0.4)
+                        let brushSize = CGFloat(viewModel.brushSize)
+                        let rect = CGRect(
+                            x: point.x - brushSize / 2,
+                            y: point.y - brushSize / 2,
+                            width: brushSize, height: brushSize
+                        )
+                        context.fill(Path(ellipseIn: rect), with: .color(color))
                     }
                 }
                 .allowsHitTesting(false)

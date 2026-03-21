@@ -1,5 +1,6 @@
 import CoreImage
 import CoreML
+import os
 import Photos
 import PhotosUI
 import SwiftUI
@@ -51,6 +52,7 @@ enum SaveResult {
 
 @Observable
 final class EditorViewModel {
+    private static let logger = Logger(subsystem: "com.imaiissatsu.BokeFocus", category: "Editor")
     // MARK: - Published state
 
     var originalImage: UIImage?
@@ -63,6 +65,7 @@ final class EditorViewModel {
     var isNegativeMode = false
     var edgeSAMAvailable = false
     var isEncoding = false
+    var toastMessage: String?
 
     // Refine state
     var isRefineAdding = true // true = add blur, false = remove blur
@@ -128,7 +131,8 @@ final class EditorViewModel {
         originalCIImage = CIImage(image: uiImage)
 
         // Encode in background to avoid blocking UI
-        if edgeSAMAvailable, let cgImage = uiImage.cgImage {
+        // Use orientation-corrected CGImage to handle EXIF rotation
+        if edgeSAMAvailable, let cgImage = normalizedCGImage(from: uiImage) {
             isEncoding = true
             await encodeWithEdgeSAM(cgImage: cgImage)
             isEncoding = false
@@ -146,7 +150,7 @@ final class EditorViewModel {
         do {
             cachedEmbedding = try edgeSAMEngine.encode(imageTensor: result.tensor)
         } catch {
-            print("[EdgeSAM] Encode failed: \(error)")
+            Self.logger.error("EdgeSAM encode failed: \(error.localizedDescription)")
         }
     }
 
@@ -154,6 +158,20 @@ final class EditorViewModel {
         cgImage: CGImage
     ) async -> (tensor: MLMultiArray, params: LetterboxParams)? {
         imagePreprocessor.preprocess(image: cgImage)
+    }
+
+    /// Normalize UIImage orientation by rendering into a new CGContext
+    /// Prevents EXIF rotation from causing misaligned SAM coordinates
+    private func normalizedCGImage(from image: UIImage) -> CGImage? {
+        if image.imageOrientation == .up {
+            return image.cgImage
+        }
+        let size = image.size
+        UIGraphicsBeginImageContextWithOptions(size, true, 1.0)
+        image.draw(in: CGRect(origin: .zero, size: size))
+        let normalized = UIGraphicsGetImageFromCurrentImageContext()
+        UIGraphicsEndImageContext()
+        return normalized?.cgImage
     }
 
     // MARK: - Tap → Vision auto-detect
@@ -190,6 +208,7 @@ final class EditorViewModel {
             await applyBlur()
         } else {
             editorState = .idle
+            showToast(L.tapOrDraw)
         }
     }
 
@@ -229,7 +248,7 @@ final class EditorViewModel {
                     return
                 }
             } catch {
-                print("[EdgeSAM] Decode failed: \(error)")
+                Self.logger.error("EdgeSAM decode failed: \(error.localizedDescription)")
             }
         }
 
@@ -250,6 +269,7 @@ final class EditorViewModel {
             await applyBlur()
         } else {
             editorState = .idle
+            showToast(L.tapOrDraw)
         }
     }
 
@@ -280,7 +300,7 @@ final class EditorViewModel {
                 await applyBlur()
             }
         } catch {
-            print("[EdgeSAM] Point refinement failed: \(error)")
+            Self.logger.error("Point refinement failed: \(error.localizedDescription)")
         }
     }
 
@@ -314,6 +334,19 @@ final class EditorViewModel {
 
         maskBitmap = ctx
         refineUndoStack = []
+        updateMaskOverlay()
+    }
+
+    /// Generate mask overlay image for visual feedback
+    /// Shows selected area with semi-transparent tint
+    private func updateMaskOverlay() {
+        guard let mask = maskCIImage else {
+            maskOverlayImage = nil
+            return
+        }
+        let ciCtx = CIContextManager.shared.context
+        guard let cgMask = ciCtx.createCGImage(mask, from: mask.extent) else { return }
+        maskOverlayImage = UIImage(cgImage: cgMask)
     }
 
     /// Apply brush stroke: points in screen coordinates
@@ -334,7 +367,11 @@ final class EditorViewModel {
         )
 
         // Convert brush size from screen to image pixels
-        let screenToImageScale = imageSize.width / metrics.displayWidth
+        // Use the actual display scale (same for both axes in AspectFit)
+        let screenToImageScale = max(
+            imageSize.width / metrics.displayWidth,
+            imageSize.height / metrics.displayHeight
+        )
         let imageBrushSize = CGFloat(brushSize) * screenToImageScale
 
         // Draw on mask bitmap
@@ -537,5 +574,15 @@ final class EditorViewModel {
         isRefineAdding = true
         brushSize = 30.0
         isEncoding = false
+    }
+
+    // MARK: - Toast
+
+    private func showToast(_ message: String) {
+        toastMessage = message
+        Task {
+            try? await Task.sleep(for: .seconds(2))
+            if toastMessage == message { toastMessage = nil }
+        }
     }
 }

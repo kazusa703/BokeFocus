@@ -1,0 +1,8 @@
+/* Photo library read access */
+"NSPhotoLibraryUsageDescription" = "बैकग्राउंड ब्लर इफ़ेक्ट लगाने के लिए फ़ोटो चुनें";
+
+/* Photo library write access */
+"NSPhotoLibraryAddUsageDescription" = "ब्लर की गई फ़ोटो को अपनी फ़ोटो लाइब्रेरी में सहेजें";
+
+/* App Tracking Transparency */
+"NSUserTrackingUsageDescription" = "BokeFocus इस ऐप के मुफ़्त संस्करण का समर्थन करने वाले प्रासंगिक विज्ञापन दिखाने के लिए आपके विज्ञापन पहचानकर्ता का उपयोग करता है। कोई व्यक्तिगत डेटा साझा नहीं किया जाता।";

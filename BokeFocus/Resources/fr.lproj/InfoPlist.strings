@@ -1,0 +1,8 @@
+/* Photo library read access */
+"NSPhotoLibraryUsageDescription" = "Choisissez des photos pour appliquer des effets de flou d'arrière-plan";
+
+/* Photo library write access */
+"NSPhotoLibraryAddUsageDescription" = "Enregistrez les photos floutées dans votre photothèque";
+
+/* App Tracking Transparency */
+"NSUserTrackingUsageDescription" = "BokeFocus utilise votre identifiant publicitaire pour afficher des publicités pertinentes qui soutiennent la version gratuite de cette app. Aucune donnée personnelle n'est partagée.";

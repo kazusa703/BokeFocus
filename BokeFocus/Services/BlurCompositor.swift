@@ -51,23 +51,37 @@ final nonisolated class BlurCompositor: Sendable {
     ) -> CIImage? {
         let extent = original.extent
 
+        // Scale distance field radius with image resolution
+        let resolution = sqrt(extent.width * extent.height)
+        let distFieldRadius = max(20.0, 30.0 * (resolution / 1024.0))
+
         let invertedMask = mask.applyingFilter(
             "CIColorInvert", parameters: [:]
         ).cropped(to: extent)
 
+        // Smooth distance field — larger radius = more gradual depth transition
         let distanceField = invertedMask
             .clampedToExtent()
             .applyingFilter(
                 "CIGaussianBlur",
-                parameters: [kCIInputRadiusKey: 30.0]
+                parameters: [kCIInputRadiusKey: distFieldRadius]
             )
             .cropped(to: extent)
 
+        // 3-layer blur: light → medium → heavy for natural depth gradient
         let lightBlur = original
             .clampedToExtent()
             .applyingFilter(
                 "CIGaussianBlur",
-                parameters: [kCIInputRadiusKey: blurRadius * 0.4]
+                parameters: [kCIInputRadiusKey: blurRadius * 0.2]
+            )
+            .cropped(to: extent)
+
+        let mediumBlur = original
+            .clampedToExtent()
+            .applyingFilter(
+                "CIGaussianBlur",
+                parameters: [kCIInputRadiusKey: blurRadius * 0.6]
             )
             .cropped(to: extent)
 
@@ -79,11 +93,27 @@ final nonisolated class BlurCompositor: Sendable {
             )
             .cropped(to: extent)
 
-        let gradientBlend = CIFilter.blendWithMask()
-        gradientBlend.inputImage = heavyBlur
-        gradientBlend.backgroundImage = lightBlur
-        gradientBlend.maskImage = distanceField
-        return gradientBlend.outputImage?.cropped(to: extent)
+        // Blend medium+heavy using distance field
+        let deepBlend = CIFilter.blendWithMask()
+        deepBlend.inputImage = heavyBlur
+        deepBlend.backgroundImage = mediumBlur
+        deepBlend.maskImage = distanceField
+        guard let deepResult = deepBlend.outputImage?.cropped(to: extent) else { return nil }
+
+        // Blend light+deep using a tighter distance field (near-edge transition)
+        let nearField = invertedMask
+            .clampedToExtent()
+            .applyingFilter(
+                "CIGaussianBlur",
+                parameters: [kCIInputRadiusKey: distFieldRadius * 0.4]
+            )
+            .cropped(to: extent)
+
+        let finalBlend = CIFilter.blendWithMask()
+        finalBlend.inputImage = deepResult
+        finalBlend.backgroundImage = lightBlur
+        finalBlend.maskImage = nearField
+        return finalBlend.outputImage?.cropped(to: extent)
     }
 
     // MARK: - Bokeh (lens-like circular bokeh)
@@ -162,7 +192,7 @@ final nonisolated class BlurCompositor: Sendable {
 
         // Step 1: Hole filling — morphological close (dilate → erode)
         // Fills small holes inside the foreground mask
-        let closeRadius = min(3.0 * scaleFactor, 5.0)
+        let closeRadius = min(4.0 * scaleFactor, 8.0)
         let closed = mask
             .applyingFilter(
                 "CIMorphologyMaximum",
@@ -176,7 +206,7 @@ final nonisolated class BlurCompositor: Sendable {
 
         // Step 2: Small blob removal — morphological open (erode → dilate)
         // Removes small isolated foreground artifacts
-        let openRadius = min(2.0 * scaleFactor, 4.0)
+        let openRadius = min(3.0 * scaleFactor, 5.0)
         let opened = closed
             .applyingFilter(
                 "CIMorphologyMinimum",
@@ -189,15 +219,17 @@ final nonisolated class BlurCompositor: Sendable {
             .cropped(to: extent)
 
         // Step 3: Guided filter — refine mask edges using original image
-        // The filter follows color boundaries in the original photo
+        // Lower eps → follows color edges more tightly
+        // Subsample capped at 4 to preserve fine detail on high-res
         let guidedRadius = max(8, Int(12.0 * scaleFactor))
-        let guidedEps: Float = 0.02
+        // Adaptive eps: lower on high-res for tighter edge following
+        let guidedEps: Float = max(0.004, 0.008 * Float(1024.0 / actualRes))
         let guided = guidedFilter.apply(
             mask: opened,
             guide: guide,
             radius: guidedRadius,
             eps: guidedEps,
-            subsample: max(2, Int(actualRes / 512.0))
+            subsample: min(4, max(2, Int(actualRes / 512.0)))
         ) ?? opened
 
         // Step 4: Sharpen mask edges
@@ -212,8 +244,9 @@ final nonisolated class BlurCompositor: Sendable {
             .cropped(to: extent)
 
         // Step 5: Final erode + feather
-        let morphRadius = min(1.5 * scaleFactor, 3.0)
-        let featherRadius = min(2.0 * scaleFactor, 3.5)
+        // Scale with resolution — no hard clamp for natural-looking transitions
+        let morphRadius = min(2.0 * scaleFactor, 4.0)
+        let featherRadius = 2.5 * scaleFactor
 
         let eroded = sharpened
             .applyingFilter(

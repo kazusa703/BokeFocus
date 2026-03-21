@@ -62,22 +62,26 @@ final nonisolated class MaskPostprocessor {
             pixels: &logitsPixels, width: contentW, height: contentH
         ) else { return nil }
 
-        // 4. Upscale logits to original image size (bilinear in logits space)
+        // 4. Upscale logits to original image size (Lanczos for sharper edges)
+        // CILanczosScaleTransform: newH = oldH*scale, newW = oldW*scale*aspectRatio
         let scaleX = params.originalSize.width / CGFloat(contentW)
         let scaleY = params.originalSize.height / CGFloat(contentH)
         let upscaled = logitsCIImage
-            .transformed(by: CGAffineTransform(scaleX: scaleX, y: scaleY))
+            .applyingFilter("CILanczosScaleTransform", parameters: [
+                kCIInputScaleKey: scaleY,
+                kCIInputAspectRatioKey: scaleX / scaleY,
+            ])
             .cropped(to: CGRect(origin: .zero, size: params.originalSize))
 
         // 5. Multi-pass edge sharpening in logits space (before threshold)
         let resolution = sqrt(params.originalSize.width * params.originalSize.height)
-        let sharpenRadius = min(2.0, 1.5 * (resolution / 2000.0))
+        let sharpenRadius = min(3.0, 2.0 * (resolution / 2000.0))
         let sharpened = upscaled
             .applyingFilter(
                 "CIUnsharpMask",
                 parameters: [
                     kCIInputRadiusKey: sharpenRadius,
-                    kCIInputIntensityKey: 0.7,
+                    kCIInputIntensityKey: 1.0,
                 ]
             )
             .cropped(to: CGRect(origin: .zero, size: params.originalSize))
@@ -87,7 +91,16 @@ final nonisolated class MaskPostprocessor {
             sharpened, from: sharpened.extent
         ) else { return nil }
 
-        return thresholdToMask(cgSharpened, threshold: threshold, imageResolution: resolution)
+        guard let thresholded = thresholdToMask(
+            cgSharpened, threshold: threshold, imageResolution: resolution
+        ) else { return nil }
+
+        // 7. Anti-alias: subtle blur to smooth staircase artifacts at mask edges
+        let aaRadius = max(0.5, 0.8 * (resolution / 2000.0))
+        return thresholded
+            .clampedToExtent()
+            .applyingFilter("CIGaussianBlur", parameters: [kCIInputRadiusKey: aaRadius])
+            .cropped(to: CGRect(origin: .zero, size: params.originalSize))
     }
 
     // MARK: - Create float CIImage from logits array
@@ -150,17 +163,17 @@ final nonisolated class MaskPostprocessor {
         guard let data = ctx.data else { return nil }
         let floatPtr = data.assumingMemoryBound(to: Float.self)
 
-        // Adaptive ramp width: narrower on high-res images for sharper edges
-        // More aggressive sharpening than before
-        let rampWidth: Float = max(0.15, 0.4 * Float(1024.0 / imageResolution))
+        // True sigmoid threshold: smooth transition at mask boundary
+        // Steepness adapts to resolution — sharper on high-res, softer on low-res
+        let steepness: Float = max(3.0, 6.0 * Float(imageResolution / 2000.0))
 
         var binaryPixels = [UInt8](repeating: 0, count: w * h)
         for i in 0 ..< w * h {
             let value = floatPtr[i]
-            // Sigmoid-like soft threshold with adaptive width
-            let normalized = (value - threshold) / rampWidth
-            let clamped = max(0.0, min(1.0, normalized * 0.5 + 0.5))
-            binaryPixels[i] = UInt8(clamped * 255.0)
+            let x = (value - threshold) * steepness
+            // Fast sigmoid approximation: 1/(1+exp(-x))
+            let sigmoid = 1.0 / (1.0 + exp(-x))
+            binaryPixels[i] = UInt8(sigmoid * 255.0)
         }
 
         guard let provider = CGDataProvider(data: Data(binaryPixels) as CFData),

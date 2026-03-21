@@ -1,0 +1,8 @@
+/* Photo library read access */
+"NSPhotoLibraryUsageDescription" = "Elige fotos para aplicar efectos de desenfoque de fondo";
+
+/* Photo library write access */
+"NSPhotoLibraryAddUsageDescription" = "Guarda las fotos desenfocadas en tu biblioteca de fotos";
+
+/* App Tracking Transparency */
+"NSUserTrackingUsageDescription" = "BokeFocus usa tu identificador de publicidad para mostrar anuncios relevantes que apoyan la versión gratuita de esta app. No se comparten datos personales.";

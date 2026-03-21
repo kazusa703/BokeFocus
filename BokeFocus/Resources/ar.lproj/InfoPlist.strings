@@ -1,0 +1,8 @@
+/* Photo library read access */
+"NSPhotoLibraryUsageDescription" = "اختر صورًا لتطبيق تأثيرات ضبابية الخلفية";
+
+/* Photo library write access */
+"NSPhotoLibraryAddUsageDescription" = "احفظ الصور المموّهة في مكتبة الصور الخاصة بك";
+
+/* App Tracking Transparency */
+"NSUserTrackingUsageDescription" = "يستخدم BokeFocus معرّف الإعلان الخاص بك لعرض إعلانات ملائمة تدعم النسخة المجانية من هذا التطبيق. لا تتم مشاركة أي بيانات شخصية.";

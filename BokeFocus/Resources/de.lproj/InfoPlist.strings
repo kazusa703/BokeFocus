@@ -1,0 +1,8 @@
+/* Photo library read access */
+"NSPhotoLibraryUsageDescription" = "Wählen Sie Fotos aus, um Hintergrundunschärfe-Effekte anzuwenden";
+
+/* Photo library write access */
+"NSPhotoLibraryAddUsageDescription" = "Speichern Sie unscharfe Fotos in Ihrer Fotobibliothek";
+
+/* App Tracking Transparency */
+"NSUserTrackingUsageDescription" = "BokeFocus verwendet Ihre Werbekennung, um relevante Anzeigen zu zeigen, die die kostenlose Version dieser App unterstützen. Es werden keine persönlichen Daten weitergegeben.";

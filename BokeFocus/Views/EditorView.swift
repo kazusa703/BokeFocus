@@ -46,6 +46,21 @@ struct EditorView: View {
                 }
 
                 instructionOverlay
+
+                if let toast = viewModel.toastMessage {
+                    VStack {
+                        Text(toast)
+                            .font(.callout)
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 10)
+                            .background(.black.opacity(0.7), in: Capsule())
+                            .transition(.move(edge: .top).combined(with: .opacity))
+                        Spacer()
+                    }
+                    .padding(.top, 60)
+                    .animation(.easeInOut, value: viewModel.toastMessage)
+                }
             }
             .contentShape(Rectangle())
             .gesture(bboxGesture(geometry: geometry))

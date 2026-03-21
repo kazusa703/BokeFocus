@@ -1,0 +1,39 @@
+{
+  "identifier" : "com.imaiissatsu.BokeFocus",
+  "nonRenewingSubscriptions" : [
+
+  ],
+  "products" : [
+    {
+      "displayPrice" : "4.99",
+      "familyShareable" : false,
+      "internalID" : "remove_ads_001",
+      "localizations" : [
+        {
+          "description" : "Remove all advertisements from BokeFocus",
+          "displayName" : "Remove Ads",
+          "locale" : "en_US"
+        },
+        {
+          "description" : "BokeFocusの広告をすべて削除します",
+          "displayName" : "広告を削除",
+          "locale" : "ja"
+        }
+      ],
+      "productID" : "com.imaiissatsu.BokeFocus.removeads",
+      "referenceName" : "Remove Ads",
+      "type" : "NonConsumable"
+    }
+  ],
+  "settings" : {
+    "_applicationInternalID" : "BokeFocus",
+    "_developerTeamID" : "WM7939G226"
+  },
+  "subscriptionGroups" : [
+
+  ],
+  "version" : {
+    "major" : 4,
+    "minor" : 0
+  }
+}

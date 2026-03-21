@@ -1,0 +1,8 @@
+/* Photo library read access */
+"NSPhotoLibraryUsageDescription" = "Choose photos to apply background blur effects";
+
+/* Photo library write access */
+"NSPhotoLibraryAddUsageDescription" = "Save blurred photos to your photo library";
+
+/* App Tracking Transparency */
+"NSUserTrackingUsageDescription" = "BokeFocus uses your advertising identifier to show relevant ads that support the free version of this app. No personal data is shared.";

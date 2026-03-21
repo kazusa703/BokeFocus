@@ -1,5 +1,7 @@
+import Accelerate
 import CoreImage
 import CoreML
+import os
 
 /// EdgeSAM Encoder/Decoder wrapper using Xcode auto-generated typed API.
 ///
@@ -7,6 +9,7 @@ import CoreML
 /// Decoder: image_embeddings + point_coords [1,N,2] + point_labels [1,N]
 ///          → masks [1,4,256,256] + scores [1,4]
 final class EdgeSAMEngine {
+    private static let logger = Logger(subsystem: "com.imaiissatsu.BokeFocus", category: "EdgeSAM")
     private var encoder: EdgeSAMEncoder?
     private var decoder: EdgeSAMDecoder?
 
@@ -24,9 +27,9 @@ final class EdgeSAMEngine {
         decoder = try? EdgeSAMDecoder(configuration: config)
 
         if isLoaded {
-            print("[EdgeSAM] Models loaded successfully")
+            Self.logger.info("Models loaded successfully")
         } else {
-            print("[EdgeSAM] Models not found — Vision-only mode")
+            Self.logger.info("Models not found — Vision-only mode")
         }
     }
 
@@ -86,6 +89,9 @@ final class EdgeSAMEngine {
             return $0.iou > $1.iou
         }
 
+        // Quality gate: reject if best mask has very low stability
+        guard maskInfos[0].stability > 0.15 else { return nil }
+
         // Weighted blend of top-2 masks in logits space
         // Better boundary quality than picking single best mask
         guard let blended = weightedBlendTopMasks(
@@ -124,8 +130,8 @@ final class EdgeSAMEngine {
         }
         var sumExp: Float = 0
         for i in 0 ..< k {
-            // Temperature=5.0 → sharper weighting toward best mask
-            let w = exp((maskInfos[i].stability - maxStab) * 5.0)
+            // Temperature=3.0 → balanced between picking winner and soft blending
+            let w = exp((maskInfos[i].stability - maxStab) * 3.0)
             weights[i] = w
             sumExp += w
         }
@@ -142,13 +148,13 @@ final class EdgeSAMEngine {
         // Initialize to zero
         dstPtr.update(repeating: 0, count: planeSize)
 
-        // Accumulate weighted logits
+        // Accumulate weighted logits using vDSP for vectorized performance
+        let n = vDSP_Length(planeSize)
         for i in 0 ..< k {
             let srcOffset = maskInfos[i].index * planeSize
-            let w = weights[i]
-            for j in 0 ..< planeSize {
-                dstPtr[j] += masksPtr[srcOffset + j] * w
-            }
+            var w = weights[i]
+            // dst[j] += src[j] * w
+            vDSP_vsma(masksPtr.advanced(by: srcOffset), 1, &w, dstPtr, 1, dstPtr, 1, n)
         }
 
         return result
@@ -156,27 +162,40 @@ final class EdgeSAMEngine {
 
     // MARK: - Stability Score
 
+    /// Compute stability score using vDSP for vectorized threshold counting.
+    /// Stability = IoU(mask(t+offset), mask(t-offset))
+    /// Uses vDSP_vthrsc to threshold without scalar loop.
     private func computeStabilityScore(
         logits: UnsafePointer<Float>,
         count: Int,
         threshold: Float,
         offset: Float
     ) -> Float {
-        var intersection = 0
-        var union = 0
+        let n = vDSP_Length(count)
 
-        let highThresh = threshold + offset
-        let lowThresh = threshold - offset
+        // Shift logits by -highThresh, then clamp negative to 0, positive to 1
+        var shifted = [Float](repeating: 0, count: count)
+        var negHighThresh = -(threshold + offset)
+        vDSP_vsadd(logits, 1, &negHighThresh, &shifted, 1, n)
+        // Clamp: val > 0 → 1, val ≤ 0 → 0
+        var lo: Float = 0
+        var hi: Float = 1
+        vDSP_vclip(shifted, 1, &lo, &hi, &shifted, 1, n)
+        // ceil: any positive → 1 (already clipped to [0,1], but need 0.001→1)
+        var highBinary = [Float](repeating: 0, count: count)
+        for i in 0 ..< count { highBinary[i] = shifted[i] > 0 ? 1.0 : 0.0 }
+        var highCount: Float = 0
+        vDSP_sve(highBinary, 1, &highCount, n)
 
-        for i in 0 ..< count {
-            let v = logits[i]
-            let high = v > highThresh
-            let low = v > lowThresh
+        // Same for low threshold
+        var negLowThresh = -(threshold - offset)
+        vDSP_vsadd(logits, 1, &negLowThresh, &shifted, 1, n)
+        vDSP_vclip(shifted, 1, &lo, &hi, &shifted, 1, n)
+        var lowBinary = [Float](repeating: 0, count: count)
+        for i in 0 ..< count { lowBinary[i] = shifted[i] > 0 ? 1.0 : 0.0 }
+        var lowCount: Float = 0
+        vDSP_sve(lowBinary, 1, &lowCount, n)
 
-            if high && low { intersection += 1 }
-            if high || low { union += 1 }
-        }
-
-        return union > 0 ? Float(intersection) / Float(union) : 0.0
+        return lowCount > 0 ? highCount / lowCount : 0.0
     }
 }

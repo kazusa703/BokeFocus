@@ -1,3 +1,4 @@
+import os
 import StoreKit
 import SwiftUI
 
@@ -7,6 +8,7 @@ final class StoreManager {
 
     /// Product IDs
     static let removeAdsID = "com.imaiissatsu.BokeFocus.removeads"
+    private static let logger = Logger(subsystem: "com.imaiissatsu.BokeFocus", category: "Store")
 
     var isAdRemoved: Bool = false
     var removeAdsProduct: Product?
@@ -25,7 +27,7 @@ final class StoreManager {
             let products = try await Product.products(for: [Self.removeAdsID])
             removeAdsProduct = products.first
         } catch {
-            print("[Store] Failed to load products: \(error)")
+            Self.logger.error("Failed to load products: \(error.localizedDescription)")
         }
     }
 
@@ -51,7 +53,7 @@ final class StoreManager {
                 break
             }
         } catch {
-            print("[Store] Purchase failed: \(error)")
+            Self.logger.error("Purchase failed: \(error.localizedDescription)")
         }
     }
 

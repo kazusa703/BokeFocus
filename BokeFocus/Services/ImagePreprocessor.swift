@@ -103,7 +103,9 @@ final nonisolated class ImagePreprocessor: Sendable {
         _ image: CGImage, toWidth width: Int, toHeight height: Int
     ) -> [UInt8]? {
         let colorSpace = CGColorSpaceCreateDeviceRGB()
-        let bitmapInfo = CGImageAlphaInfo.premultipliedLast.rawValue
+        // Use noneSkipLast to avoid premultiplied alpha affecting RGB values
+        // Photos typically have no transparency, but screenshots/PNGs might
+        let bitmapInfo = CGImageAlphaInfo.noneSkipLast.rawValue
         let bytesPerRow = width * 4
 
         guard let context = CGContext(

@@ -8,10 +8,11 @@ options:
   groupSortPosition: top
   generateEmptyDirectories: true
 
-packages:
-  GoogleMobileAds:
-    url: https://github.com/googleads/swift-package-manager-google-mobile-ads
-    from: "12.0.0"
+# GoogleMobileAds: re-add after AdMob app is fully activated
+# packages:
+#   GoogleMobileAds:
+#     url: https://github.com/googleads/swift-package-manager-google-mobile-ads
+#     from: "12.0.0"
 
 settings:
   base:
@@ -31,7 +32,8 @@ settings:
     INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription: "Save blurred photos to your photo library"
     INFOPLIST_KEY_NSUserTrackingUsageDescription: "BokeFocus uses your advertising identifier to show relevant ads that support the free version of this app. No personal data is shared."
     INFOPLIST_KEY_ITSAppUsesNonExemptEncryption: NO
-    INFOPLIST_KEY_GADApplicationIdentifier: "ca-app-pub-9569882864362674~7393222785"
+    # GADApplicationIdentifier: set after AdMob app is fully activated in console
+    # INFOPLIST_KEY_GADApplicationIdentifier: "ca-app-pub-9569882864362674~7393222785"
 
 targets:
   BokeFocus:
@@ -41,8 +43,8 @@ targets:
       - path: BokeFocus
         type: group
         createIntermediateGroups: true
-    dependencies:
-      - package: GoogleMobileAds
+    # dependencies:
+    #   - package: GoogleMobileAds
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.imaiissatsu.BokeFocus

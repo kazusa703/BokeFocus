@@ -19,8 +19,7 @@ struct BlurStylePicker: View {
                         Text(style.label)
                             .font(.system(.caption2))
                     }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 6)
+                    .frame(maxWidth: .infinity, minHeight: 44)
                     .background(
                         selected == style
                             ? Color.white.opacity(0.15)
